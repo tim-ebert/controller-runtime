@@ -39,8 +39,8 @@ func (c *typedClient) Create(ctx context.Context, obj runtime.Object, opts ...Cr
 	createOpts := &CreateOptions{}
 	createOpts.ApplyOptions(opts)
 	return o.Post().
-		NamespaceIfScoped(o.GetNamespace(), o.isNamespaced()).
-		Resource(o.resource()).
+		NamespaceIfScoped(o.GetNamespace(), o.IsNamespaced()).
+		Resource(o.Resource()).
 		Body(obj).
 		VersionedParams(createOpts.AsCreateOptions(), c.paramCodec).
 		Do(ctx).
@@ -57,8 +57,8 @@ func (c *typedClient) Update(ctx context.Context, obj runtime.Object, opts ...Up
 	updateOpts := &UpdateOptions{}
 	updateOpts.ApplyOptions(opts)
 	return o.Put().
-		NamespaceIfScoped(o.GetNamespace(), o.isNamespaced()).
-		Resource(o.resource()).
+		NamespaceIfScoped(o.GetNamespace(), o.IsNamespaced()).
+		Resource(o.Resource()).
 		Name(o.GetName()).
 		Body(obj).
 		VersionedParams(updateOpts.AsUpdateOptions(), c.paramCodec).
@@ -77,8 +77,8 @@ func (c *typedClient) Delete(ctx context.Context, obj runtime.Object, opts ...De
 	deleteOpts.ApplyOptions(opts)
 
 	return o.Delete().
-		NamespaceIfScoped(o.GetNamespace(), o.isNamespaced()).
-		Resource(o.resource()).
+		NamespaceIfScoped(o.GetNamespace(), o.IsNamespaced()).
+		Resource(o.Resource()).
 		Name(o.GetName()).
 		Body(deleteOpts.AsDeleteOptions()).
 		Do(ctx).
@@ -96,8 +96,8 @@ func (c *typedClient) DeleteAllOf(ctx context.Context, obj runtime.Object, opts 
 	deleteAllOfOpts.ApplyOptions(opts)
 
 	return o.Delete().
-		NamespaceIfScoped(deleteAllOfOpts.ListOptions.Namespace, o.isNamespaced()).
-		Resource(o.resource()).
+		NamespaceIfScoped(deleteAllOfOpts.ListOptions.Namespace, o.IsNamespaced()).
+		Resource(o.Resource()).
 		VersionedParams(deleteAllOfOpts.AsListOptions(), c.paramCodec).
 		Body(deleteAllOfOpts.AsDeleteOptions()).
 		Do(ctx).
@@ -118,8 +118,8 @@ func (c *typedClient) Patch(ctx context.Context, obj runtime.Object, patch Patch
 
 	patchOpts := &PatchOptions{}
 	return o.Patch(patch.Type()).
-		NamespaceIfScoped(o.GetNamespace(), o.isNamespaced()).
-		Resource(o.resource()).
+		NamespaceIfScoped(o.GetNamespace(), o.IsNamespaced()).
+		Resource(o.Resource()).
 		Name(o.GetName()).
 		VersionedParams(patchOpts.ApplyOptions(opts).AsPatchOptions(), c.paramCodec).
 		Body(data).
@@ -134,8 +134,8 @@ func (c *typedClient) Get(ctx context.Context, key ObjectKey, obj runtime.Object
 		return err
 	}
 	return r.Get().
-		NamespaceIfScoped(key.Namespace, r.isNamespaced()).
-		Resource(r.resource()).
+		NamespaceIfScoped(key.Namespace, r.IsNamespaced()).
+		Resource(r.Resource()).
 		Name(key.Name).Do(ctx).Into(obj)
 }
 
@@ -148,8 +148,8 @@ func (c *typedClient) List(ctx context.Context, obj runtime.Object, opts ...List
 	listOpts := ListOptions{}
 	listOpts.ApplyOptions(opts)
 	return r.Get().
-		NamespaceIfScoped(listOpts.Namespace, r.isNamespaced()).
-		Resource(r.resource()).
+		NamespaceIfScoped(listOpts.Namespace, r.IsNamespaced()).
+		Resource(r.Resource()).
 		VersionedParams(listOpts.AsListOptions(), c.paramCodec).
 		Do(ctx).
 		Into(obj)
@@ -166,8 +166,8 @@ func (c *typedClient) UpdateStatus(ctx context.Context, obj runtime.Object, opts
 	// It will be nice to receive an error saying the object doesn't implement
 	// status subresource and check CRD definition
 	return o.Put().
-		NamespaceIfScoped(o.GetNamespace(), o.isNamespaced()).
-		Resource(o.resource()).
+		NamespaceIfScoped(o.GetNamespace(), o.IsNamespaced()).
+		Resource(o.Resource()).
 		Name(o.GetName()).
 		SubResource("status").
 		Body(obj).
@@ -190,8 +190,8 @@ func (c *typedClient) PatchStatus(ctx context.Context, obj runtime.Object, patch
 
 	patchOpts := &PatchOptions{}
 	return o.Patch(patch.Type()).
-		NamespaceIfScoped(o.GetNamespace(), o.isNamespaced()).
-		Resource(o.resource()).
+		NamespaceIfScoped(o.GetNamespace(), o.IsNamespaced()).
+		Resource(o.Resource()).
 		Name(o.GetName()).
 		SubResource("status").
 		Body(data).
@@ -200,14 +200,11 @@ func (c *typedClient) PatchStatus(ctx context.Context, obj runtime.Object, patch
 		Into(obj)
 }
 
-func (c *typedClient) DoSubresource(obj runtime.Object, key ObjectKey, sub Subresource) SubresourceClient {
+func (c *typedClient) DoSubresource(obj runtime.Object, key ObjectKey, sub Subresource) error {
 	r, err := c.cache.getResource(obj)
-
-	return &subresourceClient{
-		resource:    r,
-		subresource: sub,
-		key:         key,
-		paramCodec:  c.paramCodec,
-		err:         err,
+	if err != nil {
+		return err
 	}
+
+	return sub.Do(r, key)
 }

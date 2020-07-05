@@ -1,15 +1,29 @@
 package subresource
 
-import "sigs.k8s.io/controller-runtime/pkg/client"
+import (
+	"k8s.io/apimachinery/pkg/api/meta"
 
-type Scale struct{}
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
 
-var _ client.Subresource = &Scale{}
-
-func (s Scale) Path() string {
-	return "scale"
+type scale struct {
+	crud
+	restMapper meta.RESTMapper
 }
 
-func (s Scale) Do() error {
-	panic("not implemented")
+func Scale() client.Subresource {
+	return &scale{crud: crud{path: "scale"}}
+}
+
+func (s *scale) InjectMapper(mapper meta.RESTMapper) error {
+	s.restMapper = mapper
+	return nil
+}
+
+func (s *scale) Scale(replicas int32) error {
+	return nil
+}
+
+func (s *scale) CurrentReplicas() (int32, error) {
+	return 0, nil
 }

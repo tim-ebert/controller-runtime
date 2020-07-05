@@ -74,7 +74,7 @@ func New(config *rest.Config, options Options) (Client, error) {
 		scheme:         options.Scheme,
 		mapper:         options.Mapper,
 		codecs:         serializer.NewCodecFactory(options.Scheme),
-		resourceByType: make(map[schema.GroupVersionKind]*resourceMeta),
+		resourceByType: make(map[schema.GroupVersionKind]*ResourceMeta),
 	}
 
 	c := &client{
@@ -175,7 +175,7 @@ func (c *client) List(ctx context.Context, obj runtime.Object, opts ...ListOptio
 	return c.typedClient.List(ctx, obj, opts...)
 }
 
-func (c *client) Subresource(obj runtime.Object, key ObjectKey, sub Subresource) SubresourceClient {
+func (c *client) Subresource(obj runtime.Object, key ObjectKey, sub Subresource) error {
 	_, ok := obj.(*unstructured.Unstructured)
 	if ok {
 		return c.unstructuredClient.DoSubresource(obj, key, sub)

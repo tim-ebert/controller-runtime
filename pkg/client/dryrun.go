@@ -35,7 +35,7 @@ type dryRunClient struct {
 	client Client
 }
 
-func (c *dryRunClient) Subresource(obj runtime.Object, key ObjectKey, subresource Subresource) SubresourceClient {
+func (c *dryRunClient) Subresource(obj runtime.Object, key ObjectKey, subresource Subresource) error {
 	panic("implement me")
 }
 

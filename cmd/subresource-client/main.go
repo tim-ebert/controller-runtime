@@ -51,7 +51,7 @@ func main() {
 	fmt.Printf("Deployment: %+v\n", string(deploymentJSON))
 
 	scale := &autoscalingv1.Scale{}
-	if err := c.Subresource(deployment, key, subresource.Scale{}).Get(ctx, scale); err != nil {
+	if err := c.Subresource(deployment, key, subresource.scale{}).Get(ctx, scale); err != nil {
 		panic(err)
 	}
 
@@ -67,7 +67,7 @@ func main() {
 		scale.Spec.Replicas = 2
 	}
 
-	if err := c.Subresource(deployment, key, subresource.Scale{}).Update(ctx, scale); err != nil {
+	if err := c.Subresource(deployment, key, subresource.scale{}).Update(ctx, scale); err != nil {
 		panic(err)
 	}
 

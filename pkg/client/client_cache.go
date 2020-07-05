@@ -44,13 +44,13 @@ type clientCache struct {
 	codecs serializer.CodecFactory
 
 	// resourceByType caches type metadata
-	resourceByType map[schema.GroupVersionKind]*resourceMeta
+	resourceByType map[schema.GroupVersionKind]*ResourceMeta
 	mu             sync.RWMutex
 }
 
 // newResource maps obj to a Kubernetes Resource and constructs a client for that Resource.
 // If the object is a list, the resource represents the item's type instead.
-func (c *clientCache) newResource(gvk schema.GroupVersionKind, isList bool) (*resourceMeta, error) {
+func (c *clientCache) newResource(gvk schema.GroupVersionKind, isList bool) (*ResourceMeta, error) {
 	if strings.HasSuffix(gvk.Kind, "List") && isList {
 		// if this was a list, treat it as a request for the item's resource
 		gvk.Kind = gvk.Kind[:len(gvk.Kind)-4]
@@ -64,12 +64,12 @@ func (c *clientCache) newResource(gvk schema.GroupVersionKind, isList bool) (*re
 	if err != nil {
 		return nil, err
 	}
-	return &resourceMeta{Interface: client, mapping: mapping, gvk: gvk}, nil
+	return &ResourceMeta{Interface: client, mapping: mapping, gvk: gvk}, nil
 }
 
 // getResource returns the resource meta information for the given type of object.
 // If the object is a list, the resource represents the item's type instead.
-func (c *clientCache) getResource(obj runtime.Object) (*resourceMeta, error) {
+func (c *clientCache) getResource(obj runtime.Object) (*ResourceMeta, error) {
 	gvk, err := apiutil.GVKForObject(obj, c.scheme)
 	if err != nil {
 		return nil, err
@@ -106,34 +106,34 @@ func (c *clientCache) getObjMeta(obj runtime.Object) (*objMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &objMeta{resourceMeta: r, Object: m}, err
+	return &objMeta{ResourceMeta: r, Object: m}, err
 }
 
-// resourceMeta caches state for a Kubernetes type.
-type resourceMeta struct {
+// ResourceMeta caches state for a Kubernetes type.
+type ResourceMeta struct {
 	// client is the rest client used to talk to the apiserver
 	rest.Interface
-	// gvk is the GroupVersionKind of the resourceMeta
+	// gvk is the GroupVersionKind of the ResourceMeta
 	gvk schema.GroupVersionKind
 	// mapping is the rest mapping
 	mapping *meta.RESTMapping
 }
 
-// isNamespaced returns true if the type is namespaced
-func (r *resourceMeta) isNamespaced() bool {
+// IsNamespaced returns true if the type is namespaced
+func (r *ResourceMeta) IsNamespaced() bool {
 	return r.mapping.Scope.Name() != meta.RESTScopeNameRoot
 
 }
 
-// resource returns the resource name of the type
-func (r *resourceMeta) resource() string {
+// resource returns the Resource name of the type
+func (r *ResourceMeta) Resource() string {
 	return r.mapping.Resource.Resource
 }
 
 // objMeta stores type and object information about a Kubernetes type
 type objMeta struct {
-	// resourceMeta contains type information for the object
-	*resourceMeta
+	// ResourceMeta contains type information for the object
+	*ResourceMeta
 
 	// Object contains meta data for the object instance
 	metav1.Object

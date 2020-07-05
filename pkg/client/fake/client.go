@@ -48,7 +48,7 @@ type fakeClient struct {
 	scheme  *runtime.Scheme
 }
 
-func (c *fakeClient) Subresource(obj runtime.Object, key client.ObjectKey, subresource client.Subresource) client.SubresourceClient {
+func (c *fakeClient) Subresource(obj runtime.Object, key client.ObjectKey, subresource client.Subresource) error {
 	panic("implement me")
 }
 
