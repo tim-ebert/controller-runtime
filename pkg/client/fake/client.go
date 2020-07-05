@@ -48,6 +48,10 @@ type fakeClient struct {
 	scheme  *runtime.Scheme
 }
 
+func (c *fakeClient) Subresource(obj runtime.Object, key client.ObjectKey, subresource client.Subresource) client.SubresourceClient {
+	panic("implement me")
+}
+
 var _ client.Client = &fakeClient{}
 
 const (

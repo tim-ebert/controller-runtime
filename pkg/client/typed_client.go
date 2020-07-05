@@ -199,3 +199,15 @@ func (c *typedClient) PatchStatus(ctx context.Context, obj runtime.Object, patch
 		Do(ctx).
 		Into(obj)
 }
+
+func (c *typedClient) DoSubresource(obj runtime.Object, key ObjectKey, sub Subresource) SubresourceClient {
+	r, err := c.cache.getResource(obj)
+
+	return &subresourceClient{
+		resource:    r,
+		subresource: sub,
+		key:         key,
+		paramCodec:  c.paramCodec,
+		err:         err,
+	}
+}

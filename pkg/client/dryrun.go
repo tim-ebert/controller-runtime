@@ -35,6 +35,10 @@ type dryRunClient struct {
 	client Client
 }
 
+func (c *dryRunClient) Subresource(obj runtime.Object, key ObjectKey, subresource Subresource) SubresourceClient {
+	panic("implement me")
+}
+
 // Create implements client.Client
 func (c *dryRunClient) Create(ctx context.Context, obj runtime.Object, opts ...CreateOption) error {
 	return c.client.Create(ctx, obj, append(opts, DryRunAll)...)

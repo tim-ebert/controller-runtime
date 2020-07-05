@@ -20,7 +20,6 @@ import (
 	"context"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -100,11 +99,25 @@ type StatusWriter interface {
 	Patch(ctx context.Context, obj runtime.Object, patch Patch, opts ...PatchOption) error
 }
 
+type SubresourceClient interface {
+	Get(ctx context.Context, obj runtime.Object) error
+	Create(ctx context.Context, obj runtime.Object, opts ...CreateOption) error
+	Delete(ctx context.Context, opts ...DeleteOption) error
+	Update(ctx context.Context, obj runtime.Object, opts ...UpdateOption) error
+	Patch(ctx context.Context, obj runtime.Object, patch Patch, opts ...PatchOption) error
+	Do() error
+}
+
+type Subresource interface {
+	Path() string
+}
+
 // Client knows how to perform CRUD operations on Kubernetes objects.
 type Client interface {
 	Reader
 	Writer
 	StatusClient
+	Subresource(obj runtime.Object, key ObjectKey, subresource Subresource) SubresourceClient
 }
 
 // IndexerFunc knows how to take an object and turn it into a series

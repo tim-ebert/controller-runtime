@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
@@ -172,6 +173,15 @@ func (c *client) List(ctx context.Context, obj runtime.Object, opts ...ListOptio
 		return c.unstructuredClient.List(ctx, obj, opts...)
 	}
 	return c.typedClient.List(ctx, obj, opts...)
+}
+
+func (c *client) Subresource(obj runtime.Object, key ObjectKey, sub Subresource) SubresourceClient {
+	_, ok := obj.(*unstructured.Unstructured)
+	if ok {
+		return c.unstructuredClient.DoSubresource(obj, key, sub)
+	}
+
+	return c.typedClient.DoSubresource(obj, key, sub)
 }
 
 // Status implements client.StatusClient

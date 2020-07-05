@@ -271,3 +271,15 @@ func (uc *unstructuredClient) PatchStatus(ctx context.Context, obj runtime.Objec
 	u.SetGroupVersionKind(gvk)
 	return result
 }
+
+func (uc *unstructuredClient) DoSubresource(obj runtime.Object, key ObjectKey, sub Subresource) SubresourceClient {
+	r, err := uc.cache.getResource(obj)
+
+	return &subresourceClient{
+		resource:    r,
+		subresource: sub,
+		key:         key,
+		paramCodec:  uc.paramCodec,
+		err:         err,
+	}
+}
