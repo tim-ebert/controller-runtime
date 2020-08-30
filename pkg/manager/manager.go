@@ -119,11 +119,15 @@ type Options struct {
 	// starting the manager.
 	LeaderElection bool
 
+	// LeaderElectionResourceLock determines which resource lock to use for leader election,
+	// defaults to "configmapsleases".
+	LeaderElectionResourceLock string
+
 	// LeaderElectionNamespace determines the namespace in which the leader
-	// election configmap will be created.
+	// election resource will be created.
 	LeaderElectionNamespace string
 
-	// LeaderElectionID determines the name of the configmap that leader election
+	// LeaderElectionID determines the name of the resource that leader election
 	// will use for holding the leader lock.
 	LeaderElectionID string
 
@@ -275,9 +279,10 @@ func New(config *rest.Config, options Options) (Manager, error) {
 		leaderConfig = options.LeaderElectionConfig
 	}
 	resourceLock, err := options.newResourceLock(leaderConfig, recorderProvider, leaderelection.Options{
-		LeaderElection:          options.LeaderElection,
-		LeaderElectionID:        options.LeaderElectionID,
-		LeaderElectionNamespace: options.LeaderElectionNamespace,
+		LeaderElection:             options.LeaderElection,
+		LeaderElectionResourceLock: options.LeaderElectionResourceLock,
+		LeaderElectionID:           options.LeaderElectionID,
+		LeaderElectionNamespace:    options.LeaderElectionNamespace,
 	})
 	if err != nil {
 		return nil, err

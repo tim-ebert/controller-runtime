@@ -158,6 +158,15 @@ var _ = Describe("manger.Manager", func() {
 				Expect(rl.Describe()).To(Equal("default/test-leader-election-id"))
 			})
 
+			It("should return an error if it can't create a ResourceLock", func() {
+				m, err := New(cfg, Options{
+					newResourceLock: func(_ *rest.Config, _ recorder.Provider, _ leaderelection.Options) (resourcelock.Interface, error) {
+						return nil, fmt.Errorf("expected error")
+					},
+				})
+				Expect(m).To(BeNil())
+				Expect(err).To(MatchError(ContainSubstring("expected error")))
+			})
 			It("should return an error if namespace not set and not running in cluster", func() {
 				m, err := New(cfg, Options{LeaderElection: true, LeaderElectionID: "controller-runtime"})
 				Expect(m).To(BeNil())
