@@ -22,18 +22,19 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"k8s.io/apimachinery/pkg/types"
-
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	kscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -149,33 +150,43 @@ var _ = Describe("Client", func() {
 			close(done)
 		})
 
-		// TODO(seans): cast as client struct and inspect Scheme
 		It("should use the provided Scheme if provided", func(done Done) {
 			cl, err := client.New(cfg, client.Options{Scheme: scheme})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cl).NotTo(BeNil())
+			Expect(cl.Scheme()).To(Equal(scheme))
 
 			close(done)
 		})
 
-		// TODO(seans): cast as client struct and inspect Scheme
 		It("should default the Scheme if not provided", func(done Done) {
 			cl, err := client.New(cfg, client.Options{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cl).NotTo(BeNil())
+			Expect(cl.Scheme()).To(Equal(kscheme.Scheme))
 
 			close(done)
 		})
 
-		PIt("should use the provided Mapper if provided", func() {
+		It("should use the provided Mapper if provided", func(done Done) {
+			mapper := meta.NewDefaultRESTMapper(nil)
 
+			cl, err := client.New(cfg, client.Options{Mapper: mapper})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cl).NotTo(BeNil())
+			Expect(cl.RESTMapper()).To(Equal(mapper))
+
+			close(done)
 		})
 
-		// TODO(seans): cast as client struct and inspect Mapper
 		It("should create a Mapper if not provided", func(done Done) {
+			mapper, err := apiutil.NewDynamicRESTMapper(cfg, apiutil.WithLazyDiscovery)
+			Expect(err).NotTo(HaveOccurred())
+
 			cl, err := client.New(cfg, client.Options{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cl).NotTo(BeNil())
+			Expect(cl.RESTMapper()).To(BeAssignableToTypeOf(mapper))
 
 			close(done)
 		})
@@ -271,9 +282,18 @@ var _ = Describe("Client", func() {
 				Expect(err.Error()).To(ContainSubstring("no kind is registered for the type"))
 			})
 
-			PIt("should fail if the GVK cannot be mapped to a Resource", func() {
-				// TODO(seans3): implement these
-				// Example: ListOptions
+			It("should fail if the GVK cannot be mapped to a Resource", func() {
+				By("creating a client with an empty RESTMapper")
+				mapper := meta.NewDefaultRESTMapper(nil)
+				cl, err := client.New(cfg, client.Options{Mapper: mapper})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
+
+				By("creating a Deployment fails")
+				err = cl.Create(context.TODO(), dep)
+				Expect(err).To(HaveOccurred())
+				Expect(meta.IsNoMatchError(err)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
 			})
 
 			Context("with the DryRun option", func() {
@@ -403,6 +423,29 @@ var _ = Describe("Client", func() {
 
 				close(done)
 			}, serverSideTimeoutSeconds)
+
+			It("should fail if the GVK cannot be mapped to a Resource", func() {
+				By("creating a client with an empty RESTMapper")
+				mapper := meta.NewDefaultRESTMapper(nil)
+				cl, err := client.New(cfg, client.Options{Mapper: mapper})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
+
+				By("encoding the deployment as unstructured")
+				u := &unstructured.Unstructured{}
+				Expect(scheme.Convert(dep, u, nil)).To(Succeed())
+				u.SetGroupVersionKind(schema.GroupVersionKind{
+					Group:   "apps",
+					Kind:    "Deployment",
+					Version: "v1",
+				})
+
+				By("creating the object fails")
+				err = cl.Create(context.TODO(), u)
+				Expect(err).To(HaveOccurred())
+				Expect(meta.IsNoMatchError(err)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
+			})
 
 		})
 
@@ -542,9 +585,25 @@ var _ = Describe("Client", func() {
 				close(done)
 			})
 
-			PIt("should fail if the GVK cannot be mapped to a Resource", func() {
+			It("should fail if the GVK cannot be mapped to a Resource", func() {
+				By("creating a client with an empty RESTMapper")
+				mapper := meta.NewDefaultRESTMapper(nil)
+				cl, err := client.New(cfg, client.Options{Mapper: mapper})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
 
+				By("initially creating a Deployment")
+				dep, err := clientset.AppsV1().Deployments(ns).Create(ctx, dep, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("updating the Deployment")
+				dep.Annotations = map[string]string{"foo": "bar"}
+				err = cl.Update(context.TODO(), dep)
+				Expect(err).To(HaveOccurred())
+				Expect(meta.IsNoMatchError(err)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
 			})
+
 		})
 		Context("with unstructured objects", func() {
 			It("should update an existing object from a go struct", func(done Done) {
@@ -641,6 +700,32 @@ var _ = Describe("Client", func() {
 				Expect(err).To(HaveOccurred())
 
 				close(done)
+			})
+
+			It("should fail if the GVK cannot be mapped to a Resource", func() {
+				By("creating a client with an empty RESTMapper")
+				mapper := meta.NewDefaultRESTMapper(nil)
+				cl, err := client.New(cfg, client.Options{Mapper: mapper})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
+
+				By("initially creating a Deployment")
+				dep, err := clientset.AppsV1().Deployments(ns).Create(ctx, dep, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("updating the Deployment")
+				u := &unstructured.Unstructured{}
+				Expect(scheme.Convert(dep, u, nil)).To(Succeed())
+				u.SetGroupVersionKind(schema.GroupVersionKind{
+					Group:   "apps",
+					Kind:    "Deployment",
+					Version: "v1",
+				})
+				u.SetAnnotations(map[string]string{"foo": "bar"})
+				err = cl.Update(context.TODO(), u)
+				Expect(err).To(HaveOccurred())
+				Expect(meta.IsNoMatchError(err)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
 			})
 		})
 	})
@@ -793,8 +878,23 @@ var _ = Describe("Client", func() {
 				close(done)
 			})
 
-			PIt("should fail if the GVK cannot be mapped to a Resource", func() {
+			It("should fail if the GVK cannot be mapped to a Resource", func() {
+				By("creating a client with an empty RESTMapper")
+				mapper := meta.NewDefaultRESTMapper(nil)
+				cl, err := client.New(cfg, client.Options{Mapper: mapper})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
 
+				By("initially creating a Deployment")
+				dep, err := clientset.AppsV1().Deployments(ns).Create(ctx, dep, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("updating status of the Deployment")
+				dep.Status.Replicas = 1
+				err = cl.Status().Update(context.TODO(), dep)
+				Expect(err).To(HaveOccurred())
+				Expect(meta.IsNoMatchError(err)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
 			})
 
 			PIt("should fail if an API does not implement Status subresource", func() {
@@ -945,8 +1045,25 @@ var _ = Describe("Client", func() {
 				close(done)
 			})
 
-			PIt("should fail if the GVK cannot be mapped to a Resource", func() {
+			It("should fail if the GVK cannot be mapped to a Resource", func() {
+				By("creating a client with an empty RESTMapper")
+				mapper := meta.NewDefaultRESTMapper(nil)
+				cl, err := client.New(cfg, client.Options{Mapper: mapper})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
 
+				By("initially creating a Deployment")
+				dep, err := clientset.AppsV1().Deployments(ns).Create(ctx, dep, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("updating the status of Deployment")
+				u := &unstructured.Unstructured{}
+				dep.Status.Replicas = 1
+				Expect(scheme.Convert(dep, u, nil)).To(Succeed())
+				err = cl.Status().Update(context.TODO(), u)
+				Expect(err).To(HaveOccurred())
+				Expect(meta.IsNoMatchError(err)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
 			})
 
 			PIt("should fail if an API does not implement Status subresource", func() {
@@ -1035,8 +1152,22 @@ var _ = Describe("Client", func() {
 				close(done)
 			})
 
-			PIt("should fail if the GVK cannot be mapped to a Resource", func() {
+			It("should fail if the GVK cannot be mapped to a Resource", func() {
+				By("creating a client with an empty RESTMapper")
+				mapper := meta.NewDefaultRESTMapper(nil)
+				cl, err := client.New(cfg, client.Options{Mapper: mapper})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
 
+				By("initially creating a Deployment")
+				dep, err := clientset.AppsV1().Deployments(ns).Create(ctx, dep, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("deleting the Deployment")
+				err = cl.Delete(context.TODO(), dep)
+				Expect(err).To(HaveOccurred())
+				Expect(meta.IsNoMatchError(err)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
 			})
 
 			It("should delete a collection of objects", func(done Done) {
@@ -1183,6 +1314,31 @@ var _ = Describe("Client", func() {
 
 				close(done)
 			})
+
+			It("should fail if the GVK cannot be mapped to a Resource", func() {
+				By("creating a client with an empty RESTMapper")
+				mapper := meta.NewDefaultRESTMapper(nil)
+				cl, err := client.New(cfg, client.Options{Mapper: mapper})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
+
+				By("initially creating a Deployment")
+				dep, err := clientset.AppsV1().Deployments(ns).Create(ctx, dep, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("deleting the Deployment")
+				u := &unstructured.Unstructured{}
+				Expect(scheme.Convert(dep, u, nil)).To(Succeed())
+				u.SetGroupVersionKind(schema.GroupVersionKind{
+					Group:   "apps",
+					Kind:    "Deployment",
+					Version: "v1",
+				})
+				err = cl.Delete(context.TODO(), u)
+				Expect(err).To(HaveOccurred())
+				Expect(meta.IsNoMatchError(err)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
+			})
 		})
 	})
 
@@ -1324,8 +1480,22 @@ var _ = Describe("Client", func() {
 				close(done)
 			})
 
-			PIt("should fail if the GVK cannot be mapped to a Resource", func() {
+			It("should fail if the GVK cannot be mapped to a Resource", func() {
+				By("creating a client with an empty RESTMapper")
+				mapper := meta.NewDefaultRESTMapper(nil)
+				cl, err := client.New(cfg, client.Options{Mapper: mapper})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
 
+				By("initially creating a Deployment")
+				dep, err := clientset.AppsV1().Deployments(ns).Create(ctx, dep, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("patching the Deployment")
+				err = cl.Patch(context.TODO(), dep, client.RawPatch(types.MergePatchType, mergePatch))
+				Expect(err).To(HaveOccurred())
+				Expect(meta.IsNoMatchError(err)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
 			})
 
 			It("should respect passed in update options", func() {
@@ -1479,6 +1649,31 @@ var _ = Describe("Client", func() {
 				Expect(actual).NotTo(BeNil())
 				Expect(actual.Annotations).NotTo(HaveKey("foo"))
 			})
+
+			It("should fail if the GVK cannot be mapped to a Resource", func() {
+				By("creating a client with an empty RESTMapper")
+				mapper := meta.NewDefaultRESTMapper(nil)
+				cl, err := client.New(cfg, client.Options{Mapper: mapper})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
+
+				By("initially creating a Deployment")
+				dep, err := clientset.AppsV1().Deployments(ns).Create(ctx, dep, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("patching the Deployment")
+				u := &unstructured.Unstructured{}
+				Expect(scheme.Convert(dep, u, nil)).To(Succeed())
+				u.SetGroupVersionKind(schema.GroupVersionKind{
+					Group:   "apps",
+					Kind:    "Deployment",
+					Version: "v1",
+				})
+				err = cl.Patch(context.TODO(), u, client.RawPatch(types.MergePatchType, mergePatch))
+				Expect(err).To(HaveOccurred())
+				Expect(meta.IsNoMatchError(err)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
+			})
 		})
 	})
 
@@ -1564,8 +1759,20 @@ var _ = Describe("Client", func() {
 				Expect(err.Error()).To(ContainSubstring("no kind is registered for the type"))
 			})
 
-			PIt("should fail if the GVK cannot be mapped to a Resource", func() {
+			It("should fail if the GVK cannot be mapped to a Resource", func() {
+				By("creating a client with an empty RESTMapper")
+				mapper := meta.NewDefaultRESTMapper(nil)
+				cl, err := client.New(cfg, client.Options{Mapper: mapper})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
 
+				By("fetching a Deployment fails")
+				var actual appsv1.Deployment
+				key := client.ObjectKey{Namespace: ns, Name: dep.Name}
+				err = cl.Get(context.TODO(), key, &actual)
+				Expect(err).To(HaveOccurred())
+				Expect(meta.IsNoMatchError(err)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
 			})
 		})
 
@@ -1644,6 +1851,27 @@ var _ = Describe("Client", func() {
 				Expect(err).To(HaveOccurred())
 
 				close(done)
+			})
+
+			It("should fail if the GVK cannot be mapped to a Resource", func() {
+				By("creating a client with an empty RESTMapper")
+				mapper := meta.NewDefaultRESTMapper(nil)
+				cl, err := client.New(cfg, client.Options{Mapper: mapper})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
+
+				By("fetching a Deployment fails")
+				var actual unstructured.Unstructured
+				actual.SetGroupVersionKind(schema.GroupVersionKind{
+					Group:   "apps",
+					Kind:    "Deployment",
+					Version: "v1",
+				})
+				key := client.ObjectKey{Namespace: ns, Name: dep.Name}
+				err = cl.Get(context.TODO(), key, &actual)
+				Expect(err).To(HaveOccurred())
+				Expect(meta.IsNoMatchError(err)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
 			})
 		})
 	})
@@ -2079,12 +2307,37 @@ var _ = Describe("Client", func() {
 
 			})
 
-			PIt("should fail if the object cannot be mapped to a GVK", func() {
+			It("should fail if the object cannot be mapped to a GVK", func() {
+				By("creating client with empty Scheme")
+				emptyScheme := runtime.NewScheme()
+				cl, err := client.New(cfg, client.Options{Scheme: emptyScheme})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
 
+				By("listing all objects of that type in the cluster")
+				deps := &appsv1.DeploymentList{}
+				err = cl.List(context.Background(), deps)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("no kind is registered for the type"))
 			})
 
-			PIt("should fail if the GVK cannot be mapped to a Resource", func() {
+			It("should fail if the GVK cannot be mapped to a Resource", func() {
+				By("creating a client with an empty RESTMapper")
+				mapper := meta.NewDefaultRESTMapper(nil)
+				cl, err := client.New(cfg, client.Options{Mapper: mapper})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
 
+				By("creating an initial object")
+				_, err = clientset.AppsV1().Deployments(ns).Create(ctx, dep, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("listing all objects of that type in the cluster")
+				deps := &appsv1.DeploymentList{}
+				err = cl.List(context.Background(), deps)
+				Expect(err).To(HaveOccurred())
+				Expect(meta.IsNoMatchError(err)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
 			})
 		})
 
@@ -2363,6 +2616,30 @@ var _ = Describe("Client", func() {
 
 			PIt("should fail if the object doesn't have meta", func() {
 
+			})
+
+			It("should fail if the GVK cannot be mapped to a Resource", func() {
+				By("creating a client with an empty RESTMapper")
+				mapper := meta.NewDefaultRESTMapper(nil)
+				cl, err := client.New(cfg, client.Options{Mapper: mapper})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cl).NotTo(BeNil())
+
+				By("create an initial object")
+				_, err = clientset.AppsV1().Deployments(ns).Create(ctx, dep, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("listing all objects of that type in the cluster")
+				deps := &unstructured.UnstructuredList{}
+				deps.SetGroupVersionKind(schema.GroupVersionKind{
+					Group:   "apps",
+					Kind:    "DeploymentList",
+					Version: "v1",
+				})
+				err = cl.List(context.Background(), deps)
+				Expect(err).To(HaveOccurred())
+				Expect(meta.IsNoMatchError(err)).To(BeTrue())
+				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
 			})
 
 			PIt("should filter results by namespace selector", func() {
