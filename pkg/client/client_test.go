@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -1774,6 +1776,71 @@ var _ = Describe("Client", func() {
 				Expect(meta.IsNoMatchError(err)).To(BeTrue())
 				Expect(err.Error()).To(ContainSubstring("no matches for kind"))
 			})
+
+			FContext("performance tests", func() {
+				var (
+					ctx context.Context
+
+					knownGVK, unknownGVK schema.GroupVersionKind
+					known, unknown       runtime.Object
+					key                  client.ObjectKey
+					cl                   client.Client
+					mapper               meta.RESTMapper
+
+					initOnce sync.Once
+				)
+
+				BeforeEach(func() {
+					var err error
+					ctx = context.TODO()
+
+					known = &appsv1.Deployment{}
+					unknown = &corev1.Node{}
+
+					knownGVK, err = apiutil.GVKForObject(known, scheme)
+					Expect(err).NotTo(HaveOccurred())
+					unknownGVK, err = apiutil.GVKForObject(unknown, scheme)
+					Expect(err).NotTo(HaveOccurred())
+
+					defaultMapper := meta.NewDefaultRESTMapper(nil)
+					defaultMapper.Add(knownGVK, meta.RESTScopeNamespace)
+					defaultMapper.Add(unknownGVK, meta.RESTScopeRoot)
+
+					// simulate long running discovery calls
+					mapper = delayingRESTMapper{RESTMapper: defaultMapper, delay: 100 * time.Millisecond}
+
+					// only initialize client once, as it holds the client cache we are trying to benchmark
+					initOnce.Do(func() {
+						cl, err = client.New(cfg, client.Options{Mapper: mapper})
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					By("first creating the Deployment")
+					known, err = clientset.AppsV1().Deployments(ns).Create(ctx, dep, metav1.CreateOptions{})
+					Expect(err).NotTo(HaveOccurred())
+
+					key, err = client.ObjectKeyFromObject(known)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				Measure("client creation times", func(b Benchmarker) {
+					var wg sync.WaitGroup
+					for i := 0; i < 20; i++ {
+						wg.Add(1)
+						go func(worker int) {
+							defer wg.Done()
+							defer GinkgoRecover()
+
+							obj := known.DeepCopyObject()
+
+							b.Time("runtime", func() {
+								Expect(cl.Get(ctx, key, obj)).To(Succeed())
+							})
+						}(i)
+					}
+					wg.Wait()
+				}, 5)
+			})
 		})
 
 		Context("with unstructured objects", func() {
@@ -3100,4 +3167,44 @@ func (f *fakeReader) Get(ctx context.Context, key client.ObjectKey, obj runtime.
 func (f *fakeReader) List(ctx context.Context, list runtime.Object, opts ...client.ListOption) error {
 	f.Called = f.Called + 1
 	return nil
+}
+
+type delayingRESTMapper struct {
+	meta.RESTMapper
+	delay time.Duration
+}
+
+func (d delayingRESTMapper) KindFor(resource schema.GroupVersionResource) (schema.GroupVersionKind, error) {
+	time.Sleep(d.delay)
+	return d.RESTMapper.KindFor(resource)
+}
+
+func (d delayingRESTMapper) KindsFor(resource schema.GroupVersionResource) ([]schema.GroupVersionKind, error) {
+	time.Sleep(d.delay)
+	return d.RESTMapper.KindsFor(resource)
+}
+
+func (d delayingRESTMapper) ResourceFor(input schema.GroupVersionResource) (schema.GroupVersionResource, error) {
+	time.Sleep(d.delay)
+	return d.RESTMapper.ResourceFor(input)
+}
+
+func (d delayingRESTMapper) ResourcesFor(input schema.GroupVersionResource) ([]schema.GroupVersionResource, error) {
+	time.Sleep(d.delay)
+	return d.RESTMapper.ResourcesFor(input)
+}
+
+func (d delayingRESTMapper) RESTMapping(gk schema.GroupKind, versions ...string) (*meta.RESTMapping, error) {
+	time.Sleep(d.delay)
+	return d.RESTMapper.RESTMapping(gk, versions...)
+}
+
+func (d delayingRESTMapper) RESTMappings(gk schema.GroupKind, versions ...string) ([]*meta.RESTMapping, error) {
+	time.Sleep(d.delay)
+	return d.RESTMapper.RESTMappings(gk, versions...)
+}
+
+func (d delayingRESTMapper) ResourceSingularizer(resource string) (singular string, err error) {
+	time.Sleep(d.delay)
+	return d.RESTMapper.ResourceSingularizer(resource)
 }
