@@ -27,6 +27,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -1781,64 +1782,74 @@ var _ = Describe("Client", func() {
 				var (
 					ctx context.Context
 
-					knownGVK, unknownGVK schema.GroupVersionKind
-					known, unknown       runtime.Object
-					key                  client.ObjectKey
-					cl                   client.Client
-					mapper               meta.RESTMapper
+					knownObjects []runtime.Object
+					knownGVKs    []schema.GroupVersionKind
 
-					initOnce sync.Once
+					key    client.ObjectKey
+					cl     client.Client
+					mapper meta.RESTMapper
 				)
 
 				BeforeEach(func() {
 					var err error
 					ctx = context.TODO()
+					key = client.ObjectKey{Name: "foo", Namespace: "bar"}
 
-					known = &appsv1.Deployment{}
-					unknown = &corev1.Node{}
-
-					knownGVK, err = apiutil.GVKForObject(known, scheme)
-					Expect(err).NotTo(HaveOccurred())
-					unknownGVK, err = apiutil.GVKForObject(unknown, scheme)
-					Expect(err).NotTo(HaveOccurred())
+					knownObjects = []runtime.Object{
+						&corev1.Service{},
+						&corev1.Endpoints{},
+						&corev1.Pod{},
+						&corev1.ConfigMap{},
+						&corev1.Secret{},
+						&appsv1.Deployment{},
+						&appsv1.StatefulSet{},
+						&batchv1.Job{},
+					}
 
 					defaultMapper := meta.NewDefaultRESTMapper(nil)
-					defaultMapper.Add(knownGVK, meta.RESTScopeNamespace)
-					defaultMapper.Add(unknownGVK, meta.RESTScopeRoot)
+
+					for _, knownObject := range knownObjects {
+						knownGVK, err := apiutil.GVKForObject(knownObject, scheme)
+						Expect(err).NotTo(HaveOccurred())
+						knownGVKs = append(knownGVKs, knownGVK)
+						defaultMapper.Add(knownGVK, meta.RESTScopeNamespace)
+					}
 
 					// simulate long running discovery calls
-					mapper = delayingRESTMapper{RESTMapper: defaultMapper, delay: 100 * time.Millisecond}
+					mapper = delayingRESTMapper{RESTMapper: defaultMapper, delay: 10 * time.Millisecond}
 
-					// only initialize client once, as it holds the client cache we are trying to benchmark
-					initOnce.Do(func() {
-						cl, err = client.New(cfg, client.Options{Mapper: mapper})
-						Expect(err).NotTo(HaveOccurred())
-					})
-
-					By("first creating the Deployment")
-					known, err = clientset.AppsV1().Deployments(ns).Create(ctx, dep, metav1.CreateOptions{})
-					Expect(err).NotTo(HaveOccurred())
-
-					key, err = client.ObjectKeyFromObject(known)
+					cl, err = client.New(cfg, client.Options{Mapper: mapper})
 					Expect(err).NotTo(HaveOccurred())
 				})
 
-				Measure("client creation times", func(b Benchmarker) {
+				doBenchmark := func(b Benchmarker, objects []runtime.Object, gvks []schema.GroupVersionKind) {
 					var wg sync.WaitGroup
-					for i := 0; i < 20; i++ {
+					for i, object := range objects {
 						wg.Add(1)
-						go func(worker int) {
+						go func(gvk schema.GroupVersionKind, o runtime.Object) {
 							defer wg.Done()
 							defer GinkgoRecover()
 
-							obj := known.DeepCopyObject()
-
-							b.Time("runtime", func() {
-								Expect(cl.Get(ctx, key, obj)).To(Succeed())
+							obj := o.DeepCopyObject()
+							elapsed := b.Time("first call", func() {
+								err := cl.Get(ctx, key, obj)
+								Expect(meta.IsNoMatchError(err)).To(BeFalse())
 							})
-						}(i)
+							//Expect(elapsed).NotTo(BeNumerically(">", 15*time.Millisecond))
+
+							elapsed = b.Time("second call", func() {
+								err := cl.Get(ctx, key, obj)
+								Expect(meta.IsNoMatchError(err)).To(BeFalse())
+							})
+							_ = elapsed
+							//Expect(elapsed).NotTo(BeNumerically(">", 10*time.Millisecond))
+						}(gvks[i], object)
 					}
 					wg.Wait()
+				}
+
+				Measure("only known objects", func(b Benchmarker) {
+					doBenchmark(b, knownObjects, knownGVKs)
 				}, 5)
 			})
 		})
