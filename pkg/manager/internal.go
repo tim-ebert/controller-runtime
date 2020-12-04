@@ -38,7 +38,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	logf "sigs.k8s.io/controller-runtime/pkg/internal/log"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/recorder"
 	"sigs.k8s.io/controller-runtime/pkg/runtime/inject"
@@ -56,8 +55,6 @@ const (
 	defaultLivenessEndpoint  = "/healthz/"
 	defaultMetricsEndpoint   = "/metrics"
 )
-
-var log = logf.RuntimeLog.WithName("manager")
 
 type controllerManager struct {
 	// config is the rest.config used to talk to the apiserver.  Required.
@@ -249,7 +246,7 @@ func (cm *controllerManager) SetFields(i interface{}) error {
 	if _, err := inject.MapperInto(cm.mapper, i); err != nil {
 		return err
 	}
-	if _, err := inject.LoggerInto(log, i); err != nil {
+	if _, err := inject.LoggerInto(cm.logger, i); err != nil {
 		return err
 	}
 	return nil
@@ -270,7 +267,7 @@ func (cm *controllerManager) AddMetricsExtraHandler(path string, handler http.Ha
 	}
 
 	cm.metricsExtraHandlers[path] = handler
-	log.V(2).Info("Registering metrics http server extra handler", "path", path)
+	cm.logger.V(2).Info("Registering metrics http server extra handler", "path", path)
 	return nil
 }
 
@@ -388,7 +385,7 @@ func (cm *controllerManager) serveMetrics(stop <-chan struct{}) {
 	}
 	// Run the server
 	cm.startRunnable(RunnableFunc(func(stop <-chan struct{}) error {
-		log.Info("starting metrics server", "path", defaultMetricsEndpoint)
+		cm.logger.Info("starting metrics server", "path", defaultMetricsEndpoint)
 		if err := server.Serve(cm.metricsListener); err != nil && err != http.ErrServerClosed {
 			return err
 		}
@@ -518,7 +515,7 @@ func (cm *controllerManager) engageStopProcedure(stopComplete chan struct{}) err
 			select {
 			case err, ok := <-cm.errChan:
 				if ok {
-					log.Error(err, "error received after stop sequence was engaged")
+					cm.logger.Error(err, "error received after stop sequence was engaged")
 				}
 			case <-stopComplete:
 				return
