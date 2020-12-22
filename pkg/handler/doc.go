@@ -34,5 +34,9 @@ to be reconciled.
 EnqueueRequestsFromMapFunc - Enqueues reconcile.Requests resulting from a user provided transformation function run against the
 object in the Event.  This will cause an arbitrary collection of objects (defined from a transformation of the
 source object) to be reconciled.
+
+EnqueueRequestsFromMapper - Enqueues reconcile.Requests resulting from a user provided transformation function run against the
+object in the Event.  This will cause an arbitrary collection of objects (defined from a transformation of the
+source object) to be reconciled.
 */
 package handler
