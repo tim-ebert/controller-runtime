@@ -1,3 +1,19 @@
+/*
+Copyright 2018 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package envtest
 
 import (
@@ -94,6 +110,16 @@ var _ = Describe("Test", func() {
 			Expect(len(installOptions.MutatingWebhooks)).To(Equal(2))
 			Expect(len(installOptions.ValidatingWebhooks)).To(Equal(2))
 		})
+
+		It("should load webhooks from object lists", func() {
+			installOptions := WebhookInstallOptions{
+				ValidatingWebhooks: getValidatingWebhookConfigs(),
+			}
+			err := parseWebhook(&installOptions)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(len(installOptions.MutatingWebhooks)).To(Equal(2))
+			Expect(len(installOptions.ValidatingWebhooks)).To(Equal(2))
+		})
 	})
 })
 
@@ -102,4 +128,8 @@ type rejectingValidator struct {
 
 func (v *rejectingValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	return admission.Denied(fmt.Sprint("Always denied"))
+}
+
+func getValidatingWebhookConfigs() []client.Object {
+
 }

@@ -348,6 +348,13 @@ func ensureCreated(cs client.Client, obj *unstructured.Unstructured) error {
 
 // parseWebhook reads the directories or files of Webhooks in options.Paths and adds the Webhook structs to options
 func parseWebhook(options *WebhookInstallOptions) error {
+	if err := fillAllTypeMeta(options.MutatingWebhooks); err != nil {
+		return err
+	}
+	if err := fillAllTypeMeta(options.ValidatingWebhooks); err != nil {
+		return err
+	}
+
 	if len(options.Paths) > 0 {
 		for _, path := range options.Paths {
 			_, err := os.Stat(path)

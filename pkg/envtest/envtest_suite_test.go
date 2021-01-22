@@ -66,10 +66,6 @@ func initializeWebhookInEnvironment() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "deployment-validation-webhook-config",
 				},
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "ValidatingWebhookConfiguration",
-					APIVersion: "admissionregistration.k8s.io/v1beta1",
-				},
 				Webhooks: []admissionv1beta1.ValidatingWebhook{
 					{
 						Name: "deployment-validation.kubebuilder.io",
@@ -100,10 +96,6 @@ func initializeWebhookInEnvironment() {
 			&admissionv1.ValidatingWebhookConfiguration{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "deployment-validation-webhook-config",
-				},
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "ValidatingWebhookConfiguration",
-					APIVersion: "admissionregistration.k8s.io/v1beta1",
 				},
 				Webhooks: []admissionv1.ValidatingWebhook{
 					{

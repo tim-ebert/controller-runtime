@@ -5,17 +5,21 @@ import (
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
 var (
-	crdScheme = runtime.NewScheme()
+	helperScheme = runtime.NewScheme()
 )
 
-// init is required to correctly initialize the crdScheme package variable.
+// init is required to correctly initialize the helperScheme package variable.
 func init() {
-	_ = apiextensionsv1.AddToScheme(crdScheme)
-	_ = apiextensionsv1beta1.AddToScheme(crdScheme)
+	utilruntime.Must(apiextensionsv1.AddToScheme(helperScheme))
+	utilruntime.Must(apiextensionsv1beta1.AddToScheme(helperScheme))
+	utilruntime.Must(clientgoscheme.AddToScheme(helperScheme))
 }
 
 // mergePaths merges two string slices containing paths.
@@ -60,11 +64,33 @@ func runtimeCRDListToUnstructured(l []client.Object) []*unstructured.Unstructure
 	res := []*unstructured.Unstructured{}
 	for _, obj := range l {
 		u := &unstructured.Unstructured{}
-		if err := crdScheme.Convert(obj, u, nil); err != nil {
+		if err := helperScheme.Convert(obj, u, nil); err != nil {
 			log.Error(err, "error converting to unstructured object", "object-kind", obj.GetObjectKind())
 			continue
 		}
 		res = append(res, u)
 	}
 	return res
+}
+
+func fillAllTypeMeta(l []client.Object) error {
+	for _, o := range l {
+		objectGVK := o.GetObjectKind().GroupVersionKind()
+		detectedGVK, err := apiutil.GVKForObject(o, helperScheme)
+		if err != nil {
+			return err
+		}
+
+		if objectGVK.Kind == "" {
+			objectGVK.Kind = detectedGVK.Kind
+		}
+		if objectGVK.Group == "" {
+			objectGVK.Group = detectedGVK.Group
+		}
+		if objectGVK.Version == "" {
+			objectGVK.Version = detectedGVK.Version
+		}
+		o.GetObjectKind().SetGroupVersionKind(objectGVK)
+	}
+	return nil
 }
