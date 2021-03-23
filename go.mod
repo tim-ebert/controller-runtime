@@ -10,6 +10,7 @@ require (
 	github.com/googleapis/gnostic v0.5.4 // indirect
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/imdario/mergo v0.3.11 // indirect
+	github.com/k3s-io/kine v0.6.0
 	github.com/onsi/ginkgo v1.15.0
 	github.com/onsi/gomega v1.10.5
 	github.com/prometheus/client_golang v1.9.0

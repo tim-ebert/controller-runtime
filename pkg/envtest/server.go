@@ -221,19 +221,19 @@ func (te *Environment) Start() (*rest.Config, error) {
 		if te.ControlPlane.APIServer.Err == nil && te.AttachControlPlaneOutput {
 			te.ControlPlane.APIServer.Err = os.Stderr
 		}
-		if te.ControlPlane.Etcd.Out == nil && te.AttachControlPlaneOutput {
-			te.ControlPlane.Etcd.Out = os.Stdout
-		}
-		if te.ControlPlane.Etcd.Err == nil && te.AttachControlPlaneOutput {
-			te.ControlPlane.Etcd.Err = os.Stderr
-		}
+		//if te.ControlPlane.Etcd.Out == nil && te.AttachControlPlaneOutput {
+		//	te.ControlPlane.Etcd.Out = os.Stdout
+		//}
+		//if te.ControlPlane.Etcd.Err == nil && te.AttachControlPlaneOutput {
+		//	te.ControlPlane.Etcd.Err = os.Stderr
+		//}
 
 		if os.Getenv(envKubeAPIServerBin) == "" {
 			te.ControlPlane.APIServer.Path = te.getBinAssetPath("kube-apiserver")
 		}
-		if os.Getenv(envEtcdBin) == "" {
-			te.ControlPlane.Etcd.Path = te.getBinAssetPath("etcd")
-		}
+		//if os.Getenv(envEtcdBin) == "" {
+		//	te.ControlPlane.Etcd.Path = te.getBinAssetPath("etcd")
+		//}
 		if os.Getenv(envKubectlBin) == "" {
 			// we can't just set the path manually (it's behind a function), so set the environment variable instead
 			if err := os.Setenv(envKubectlBin, te.getBinAssetPath("kubectl")); err != nil {
@@ -244,8 +244,8 @@ func (te *Environment) Start() (*rest.Config, error) {
 		if err := te.defaultTimeouts(); err != nil {
 			return nil, fmt.Errorf("failed to default controlplane timeouts: %w", err)
 		}
-		te.ControlPlane.Etcd.StartTimeout = te.ControlPlaneStartTimeout
-		te.ControlPlane.Etcd.StopTimeout = te.ControlPlaneStopTimeout
+		//te.ControlPlane.Etcd.StartTimeout = te.ControlPlaneStartTimeout
+		//te.ControlPlane.Etcd.StopTimeout = te.ControlPlaneStopTimeout
 		te.ControlPlane.APIServer.StartTimeout = te.ControlPlaneStartTimeout
 		te.ControlPlane.APIServer.StopTimeout = te.ControlPlaneStopTimeout
 

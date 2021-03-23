@@ -2,7 +2,7 @@ package internal
 
 import (
 	"bytes"
-	"html/template"
+	"text/template"
 )
 
 // RenderTemplates returns an []string to render the templates

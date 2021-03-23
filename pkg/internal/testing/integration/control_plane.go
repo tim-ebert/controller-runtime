@@ -22,7 +22,13 @@ var NewTinyCA = internal.NewTinyCA
 // future.
 type ControlPlane struct {
 	APIServer *APIServer
-	Etcd      *Etcd
+	Etcd      Datastore
+}
+
+type Datastore interface {
+	Start() error
+	Stop() error
+	ConnectURL() *url.URL
 }
 
 // Start will start your control plane processes. To stop them, call Stop().
@@ -37,7 +43,7 @@ func (f *ControlPlane) Start() error {
 	if f.APIServer == nil {
 		f.APIServer = &APIServer{}
 	}
-	f.APIServer.EtcdURL = f.Etcd.URL
+	f.APIServer.EtcdURL = f.Etcd.ConnectURL()
 	return f.APIServer.Start()
 }
 

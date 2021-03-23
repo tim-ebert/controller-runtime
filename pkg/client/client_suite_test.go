@@ -17,6 +17,7 @@ limitations under the License.
 package client_test
 
 import (
+	"flag"
 	"testing"
 
 	. "github.com/onsi/ginkgo"
@@ -25,6 +26,7 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/envtest/printer"
+	"sigs.k8s.io/controller-runtime/pkg/internal/testing/integration"
 
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -40,10 +42,21 @@ var testenv *envtest.Environment
 var cfg *rest.Config
 var clientset *kubernetes.Clientset
 
+var inMemory = flag.Bool("in-memory", false, "use in memory sqlite")
+
 var _ = BeforeSuite(func(done Done) {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
-	testenv = &envtest.Environment{}
+	kine := &integration.Kine{}
+	if inMemory != nil && *inMemory {
+		kine.DSN = "sqlite://file::memory:?_journal=WAL&cache=shared"
+	}
+
+	testenv = &envtest.Environment{
+		ControlPlane: integration.ControlPlane{
+			Etcd: kine,
+		},
+	}
 
 	var err error
 	cfg, err = testenv.Start()
