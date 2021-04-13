@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -28,9 +29,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
+	watchtools "k8s.io/client-go/tools/watch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 var _ = Describe("ClientWithWatch", func() {
@@ -127,5 +132,87 @@ var _ = Describe("ClientWithWatch", func() {
 			close(done)
 		}, 15)
 	})
+
+	FIt("should create and watch until condition is met", func(done Done) {
+		cl, err := client.NewWithWatch(cfg, client.Options{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cl).NotTo(BeNil())
+
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "watched-cm", Namespace: "default"},
+		}
+		cmList := &corev1.ConfigMapList{}
+		condition := watchtools.ConditionFunc(func(event watch.Event) (bool, error) {
+			switch event.Type {
+			case watch.Modified:
+			default:
+				return false, nil
+			}
+
+			switch eventObj := event.Object.(type) {
+			case *corev1.ConfigMap:
+				status := eventObj.Data["status"]
+				fmt.Println("event status=" + status + " resourceVersion=" + eventObj.ResourceVersion)
+				return status == "ready", nil
+			}
+			return false, nil
+		})
+
+		_, err = controllerutil.CreateOrUpdate(ctx, cl, cm, func() error {
+			cm.Data = make(map[string]string, 1)
+			cm.Data["status"] = "ready"
+			fmt.Println("create status=" + cm.Data["status"])
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		minResourceVersion := cm.ResourceVersion
+		fmt.Println("minResourceVersion=" + minResourceVersion)
+		//minResourceVersion = "48"
+
+		fieldSelector := fields.OneTermEqualSelector("metadata.name", cm.GetName())
+		lw := &cache.ListWatch{
+			ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
+				if opts.ResourceVersion == "0" {
+					opts.ResourceVersion = minResourceVersion
+					fmt.Println("setting ListOptions.ResourceVersion=" + minResourceVersion)
+				} else {
+					fmt.Println("list with ListOptions.ResourceVersion=" + opts.ResourceVersion)
+				}
+
+				err := cl.List(ctx, cmList, &client.ListOptions{
+					FieldSelector: fieldSelector,
+					Namespace:     cm.GetNamespace(),
+					Raw:           &opts,
+				})
+				return cmList, err
+			},
+			WatchFunc: func(opts metav1.ListOptions) (watch.Interface, error) {
+				fmt.Println("watch with ListOptions.ResourceVersion=" + opts.ResourceVersion)
+				return cl.Watch(ctx, cmList, &client.ListOptions{
+					FieldSelector: fieldSelector,
+					Namespace:     cm.GetNamespace(),
+					Raw:           &opts,
+				})
+			},
+		}
+
+		go func() {
+			defer GinkgoRecover()
+			<-time.After(100 * time.Millisecond)
+			patch := client.MergeFrom(cm.DeepCopy())
+			cm.Data["status"] = "not ready"
+			Expect(cl.Patch(ctx, cm, patch)).To(Succeed())
+			fmt.Println("patch status=" + cm.Data["status"] + " resourceVersion=" + cm.ResourceVersion)
+
+			<-time.After(100 * time.Millisecond)
+			patch = client.MergeFrom(cm.DeepCopy())
+			cm.Data["status"] = "ready"
+			Expect(cl.Patch(ctx, cm, patch)).To(Succeed())
+			fmt.Println("patch status=" + cm.Data["status"] + " resourceVersion=" + cm.ResourceVersion)
+		}()
+
+		_, err = watchtools.UntilWithSync(ctx, lw, cm, nil, condition)
+		close(done)
+	}, 15)
 
 })
