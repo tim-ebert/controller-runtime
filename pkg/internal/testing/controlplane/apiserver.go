@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -16,15 +15,62 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/internal/testing/process"
 )
 
+const (
+	// saKeyFile is the name of the service account signing private key file
+	saKeyFile = "sa-signer.key"
+	// saKeyFile is the name of the service account signing public key (cert) file
+	saCertFile = "sa-signer.crt"
+)
+
+// SecureServing provides/configures how the API server serves on the secure port.
+type SecureServing struct {
+	// ListenAddr contains the host & port to serve on.
+	//
+	// Configurable.  If unset, it will be defaulted.
+	process.ListenAddr
+	// CA contains the CA that signed the API server's serving certificates.
+	//
+	// Read-only.
+	CA []byte
+	// Authn can be used to provision users, and override what type of
+	// authentication is used to provision users.
+	//
+	// Configurable.  If unset, it will be defaulted.
+	Authn
+}
+
 // APIServer knows how to run a kubernetes apiserver.
 type APIServer struct {
-	// URL is the address the ApiServer should listen on for client connections.
+	// URL is the address the ApiServer should listen on for client
+	// connections.
+	//
+	// If set, this will configure the *insecure* serving details.
+	// If unset, it will contain the insecure port if insecure serving is enabled,
+	// and otherwise will contain the secure port.
 	//
 	// If this is not specified, we default to a random free port on localhost.
+	//
+	// Deprecated: use InsecureServing (for the insecure URL) or SecureServing, ideally.
 	URL *url.URL
 
 	// SecurePort is the additional secure port that the APIServer should listen on.
+	//
+	// Deprecated: use SecureServing.
 	SecurePort int
+
+	// SecureServing indicates how the API server will serve on the secure port.
+	//
+	// Some parts are configurable.  Will be defaulted if unset.
+	SecureServing
+
+	// InsecureServing indicates how the API server will serve on the insecure port.
+	//
+	// If unset, the insecure port will be disabled.  Set to an empty struct to get
+	// default values.
+	//
+	// Deprecated: does not work with Kubernetes versions 1.20 and above.  Use secure
+	// serving instead.
+	InsecureServing *process.ListenAddr
 
 	// Path is the path to the apiserver binary.
 	//
@@ -101,7 +147,49 @@ func (s *APIServer) Start() error {
 			return err
 		}
 	}
+	if err := s.Authn.Start(); err != nil {
+		return err
+	}
 	return s.processState.Start(s.Out, s.Err)
+}
+
+// configurePorts configures the serving ports for this API server.
+//
+// Most of this method currently deals with making the deprecated fields
+// take precedence over the new fields.
+func (s *APIServer) configurePorts() error {
+	// prefer the old fields to the new fields if a user set one,
+	// otherwise, default the new fields and populate the old ones.
+
+	// Insecure: URL, InsecureServing
+	if s.URL != nil {
+		s.InsecureServing = &process.ListenAddr{
+			Address: s.URL.Hostname(),
+			Port:    s.URL.Port(),
+		}
+	} else if insec := s.InsecureServing; insec != nil {
+		if insec.Port == "" || insec.Address == "" {
+			port, host, err := addr.Suggest("")
+			if err != nil {
+				return fmt.Errorf("unable to provision unused insecure port: %w", err)
+			}
+			s.InsecureServing.Port = strconv.Itoa(port)
+			s.InsecureServing.Address = host
+		}
+		s.URL = s.InsecureServing.URL("http", "")
+	}
+
+	// secure doesn't need a weird hierarchy, we just default if something isn't set
+	if s.SecureServing.Port == "" || s.SecureServing.Address == "" {
+		port, host, err := addr.Suggest("")
+		if err != nil {
+			return fmt.Errorf("unable to provision unused secure port: %w", err)
+		}
+		s.SecureServing.Port = strconv.Itoa(port)
+		s.SecureServing.Address = host
+	}
+
+	return nil
 }
 
 func (s *APIServer) setProcessState() error {
@@ -121,27 +209,12 @@ func (s *APIServer) setProcessState() error {
 		return err
 	}
 
-	// Defaulting the secure port
-	if s.SecurePort == 0 {
-		s.SecurePort, _, err = addr.Suggest("")
-		if err != nil {
-			return err
-		}
+	if err := s.configurePorts(); err != nil {
+		return err
 	}
 
-	if s.URL == nil {
-		port, host, err := addr.Suggest("")
-		if err != nil {
-			return err
-		}
-		s.URL = &url.URL{
-			Scheme: "http",
-			Host:   net.JoinHostPort(host, strconv.Itoa(port)),
-		}
-	}
-
-	s.processState.HealthCheck.URL = *s.URL
-	s.processState.HealthCheck.Path = "/healthz"
+	// the secure port will always be on, so use that
+	s.processState.HealthCheck.URL = *s.SecureServing.URL("https", "/healthz")
 
 	s.CertDir = s.processState.Dir
 	s.Path = s.processState.Path
@@ -149,6 +222,34 @@ func (s *APIServer) setProcessState() error {
 	s.StopTimeout = s.processState.StopTimeout
 
 	if err := s.populateAPIServerCerts(); err != nil {
+		return err
+	}
+
+	if s.SecureServing.Authn == nil {
+		authn, err := NewCertAuthn()
+		if err != nil {
+			return err
+		}
+		s.SecureServing.Authn = authn
+	}
+
+	if err := s.Authn.Configure(s.CertDir, s.Configure()); err != nil {
+		return err
+	}
+
+	// NB(directxman12): insecure port is a mess:
+	// - 1.19 and below have the `--insecure-port` flag, and require it to be set to zero to
+	//   disable it, otherwise the default will be used and we'll conflict.
+	// - 1.20 requires the flag to be unset or set to zero, and yells at you if you configure it
+	// - 1.24 won't have the flag at all...
+	//
+	// In an effort to automatically do the right thing during this mess, we do feature discovery
+	// on the flags, and hope that we've "parsed" them properly.
+	//
+	// TODO(directxman12): once we support 1.20 as the min version (might be when 1.24 comes out,
+	// might be around 1.25 or 1.26), remove this logic and the corresponding line in API server's
+	// default args.
+	if err := s.discoverFlags(); err != nil {
 		return err
 	}
 
@@ -162,7 +263,24 @@ func (s *APIServer) setProcessState() error {
 			"service-cluster-ip-range": []string{"10.0.0.0/24"},
 		},
 	})
+
 	return err
+}
+
+// discoverFlags checks for certain flags that *must* be set in certain
+// versions, and *must not* be set in others.
+func (s *APIServer) discoverFlags() error {
+	// Present: <1.24, Absent: >= 1.24
+	present, err := s.processState.CheckFlag("insecure-port")
+	if err != nil {
+		return err
+	}
+
+	if !present {
+		s.Configure().Disable("insecure-port")
+	}
+
+	return nil
 }
 
 func (s *APIServer) defaultArgs() map[string][]string {
@@ -175,6 +293,17 @@ func (s *APIServer) defaultArgs() map[string][]string {
 		// apiserver operation this SA is created by controller, but that is
 		// not run in integration environment
 		"disable-admission-plugins": []string{"ServiceAccount"},
+		"authorization-mode":        []string{"RBAC"},
+		"secure-port":               []string{s.SecureServing.Port},
+		// NB(directxman12): previously we didn't set the bind address for the secure
+		// port.  It *shouldn't* make a difference unless people are doing something really
+		// funky, but if you start to get bug reports look here ;-)
+		"bind-address": []string{s.SecureServing.Address},
+
+		// required on 1.20+, fine to leave on for <1.20
+		"service-account-issuer":           []string{s.SecureServing.URL("https", "/").String()},
+		"service-account-key-file":         []string{filepath.Join(s.CertDir, saCertFile)},
+		"service-account-signing-key-file": []string{filepath.Join(s.CertDir, saKeyFile)},
 	}
 	if s.EtcdURL != nil {
 		args["etcd-servers"] = []string{s.EtcdURL.String()}
@@ -185,6 +314,11 @@ func (s *APIServer) defaultArgs() map[string][]string {
 	if s.URL != nil {
 		args["insecure-port"] = []string{s.URL.Port()}
 		args["insecure-bind-address"] = []string{s.URL.Hostname()}
+	} else {
+		// TODO(directxman12): remove this once 1.21 is the lowest version we support
+		// (this might be a while, but this line'll break as of 1.24, so see the comment
+		// in Start
+		args["insecure-port"] = []string{"0"}
 	}
 	return args
 }
@@ -200,12 +334,12 @@ func (s *APIServer) populateAPIServerCerts() error {
 		return err
 	}
 
-	certs, err := ca.NewServingCert()
+	servingCerts, err := ca.NewServingCert()
 	if err != nil {
 		return err
 	}
 
-	certData, keyData, err := certs.AsBytes()
+	certData, keyData, err := servingCerts.AsBytes()
 	if err != nil {
 		return err
 	}
@@ -220,6 +354,26 @@ func (s *APIServer) populateAPIServerCerts() error {
 		return err
 	}
 
+	s.SecureServing.CA = ca.CA.CertBytes()
+
+	// service account signing files too
+	saCA, err := certs.NewTinyCA()
+	if err != nil {
+		return err
+	}
+
+	saCert, saKey, err := saCA.CA.AsBytes()
+	if err != nil {
+		return err
+	}
+
+	if err := ioutil.WriteFile(filepath.Join(s.CertDir, saCertFile), saCert, 0640); err != nil {
+		return err
+	}
+	if err := ioutil.WriteFile(filepath.Join(s.CertDir, saKeyFile), saKey, 0640); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -229,7 +383,7 @@ func (s *APIServer) Stop() error {
 	if s.processState != nil {
 		return s.processState.Stop()
 	}
-	return nil
+	return s.Authn.Stop()
 }
 
 // APIServerDefaultArgs exposes the default args for the APIServer so that you

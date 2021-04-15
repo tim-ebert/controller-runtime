@@ -26,7 +26,7 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
-	"sigs.k8s.io/controller-runtime/pkg/internal/testing/integration"
+	"sigs.k8s.io/controller-runtime/pkg/internal/testing/controlplane"
 
 	logf "sigs.k8s.io/controller-runtime/pkg/internal/log"
 )
@@ -81,19 +81,25 @@ func (te *Environment) getBinAssetPath(binary string) string {
 }
 
 // ControlPlane is the re-exported ControlPlane type from the internal integration package
-type ControlPlane = integration.ControlPlane
+type ControlPlane = controlplane.ControlPlane
 
 // APIServer is the re-exported APIServer type from the internal integration package
-type APIServer = integration.APIServer
+type APIServer = controlplane.APIServer
 
 // Etcd is the re-exported Etcd type from the internal integration package
-type Etcd = integration.Etcd
+type Etcd = controlplane.Etcd
+
+// User represents a Kubernetes user to provision for auth purposes.
+type User = controlplane.User
+
+// AuthenticatedUser represets a Kubernetes user that's been provisioned.
+type AuthenticatedUser = controlplane.AuthenticatedUser
 
 // Environment creates a Kubernetes test environment that will start / stop the Kubernetes control plane and
 // install extension APIs
 type Environment struct {
 	// ControlPlane is the ControlPlane including the apiserver and etcd
-	ControlPlane integration.ControlPlane
+	ControlPlane controlplane.ControlPlane
 
 	// Config can be used to talk to the apiserver.  It's automatically
 	// populated if not set using the standard controller-runtime config
@@ -168,27 +174,6 @@ func (te *Environment) Stop() error {
 	return te.ControlPlane.Stop()
 }
 
-// getAPIServerFlags returns flags to be used with the Kubernetes API server.
-// it returns empty slice for api server defined defaults to be applied if no args specified
-func (te Environment) getAPIServerFlags() []string {
-	// Set default API server flags if not set.
-	if len(te.KubeAPIServerFlags) == 0 {
-		return []string{}
-	}
-	// Check KubeAPIServerFlags contains service-cluster-ip-range, if not, set default value to service-cluster-ip-range
-	containServiceClusterIPRange := false
-	for _, flag := range te.KubeAPIServerFlags {
-		if strings.Contains(flag, "service-cluster-ip-range") {
-			containServiceClusterIPRange = true
-			break
-		}
-	}
-	if !containServiceClusterIPRange {
-		te.KubeAPIServerFlags = append(te.KubeAPIServerFlags, "--service-cluster-ip-range=10.0.0.0/24")
-	}
-	return te.KubeAPIServerFlags
-}
-
 // Start starts a local Kubernetes server and updates te.ApiserverPort with the port it is listening on
 func (te *Environment) Start() (*rest.Config, error) {
 	if te.useExistingCluster() {
@@ -201,15 +186,15 @@ func (te *Environment) Start() (*rest.Config, error) {
 			var err error
 			te.Config, err = config.GetConfig()
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("unable to get configuration for existing cluster: %w", err)
 			}
 		}
 	} else {
 		if te.ControlPlane.APIServer == nil {
-			te.ControlPlane.APIServer = &integration.APIServer{Args: te.getAPIServerFlags()}
+			te.ControlPlane.APIServer = &controlplane.APIServer{}
 		}
 		if te.ControlPlane.Etcd == nil {
-			te.ControlPlane.Etcd = &integration.Etcd{}
+			te.ControlPlane.Etcd = &controlplane.Etcd{}
 		}
 
 		if os.Getenv(envAttachOutput) == "true" {
@@ -236,8 +221,9 @@ func (te *Environment) Start() (*rest.Config, error) {
 		}
 		if os.Getenv(envKubectlBin) == "" {
 			// we can't just set the path manually (it's behind a function), so set the environment variable instead
+			// TODO(directxman12): re-evaluate this post pkg/internal/testing refactor
 			if err := os.Setenv(envKubectlBin, te.getBinAssetPath("kubectl")); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("unable to override kubectl environment path: %w", err)
 			}
 		}
 
@@ -251,16 +237,22 @@ func (te *Environment) Start() (*rest.Config, error) {
 
 		log.V(1).Info("starting control plane", "api server flags", te.ControlPlane.APIServer.Args)
 		if err := te.startControlPlane(); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("unable to start control plane itself: %w", err)
 		}
 
 		// Create the *rest.Config for creating new clients
-		te.Config = &rest.Config{
-			Host: te.ControlPlane.APIURL().Host,
+		baseConfig := &rest.Config{
 			// gotta go fast during tests -- we don't really care about overwhelming our test API server
 			QPS:   1000.0,
 			Burst: 2000.0,
 		}
+
+		adminInfo := User{Name: "admin", Groups: []string{"system:masters"}}
+		adminUser, err := te.ControlPlane.AddUser(adminInfo, baseConfig)
+		if err != nil {
+			return te.Config, fmt.Errorf("unable to provision admin user: %w", err)
+		}
+		te.Config = adminUser.Config()
 	}
 
 	log.V(1).Info("installing CRDs")
@@ -269,14 +261,17 @@ func (te *Environment) Start() (*rest.Config, error) {
 	te.CRDInstallOptions.ErrorIfPathMissing = te.ErrorIfCRDPathMissing
 	crds, err := InstallCRDs(te.Config, te.CRDInstallOptions)
 	if err != nil {
-		return te.Config, err
+		return te.Config, fmt.Errorf("unable to install CRDs onto control plane: %w", err)
 	}
 	te.CRDs = crds
 
 	log.V(1).Info("installing webhooks")
 	err = te.WebhookInstallOptions.Install(te.Config)
 
-	return te.Config, err
+	if err != nil {
+		return te.Config, fmt.Errorf("unable to install webhooks onto control plane: %w", err)
+	}
+	return te.Config, nil
 }
 
 func (te *Environment) startControlPlane() error {
@@ -331,4 +326,4 @@ func (te *Environment) useExistingCluster() bool {
 
 // DefaultKubeAPIServerFlags exposes the default args for the APIServer so that
 // you can use those to append your own additional arguments.
-var DefaultKubeAPIServerFlags = integration.APIServerDefaultArgs
+var DefaultKubeAPIServerFlags = controlplane.APIServerDefaultArgs
