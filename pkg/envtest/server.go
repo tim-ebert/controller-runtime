@@ -57,20 +57,49 @@ const (
 	defaultKubebuilderControlPlaneStopTimeout  = 20 * time.Second
 )
 
-// ControlPlane is the re-exported ControlPlane type from the internal integration package
-type ControlPlane = controlplane.ControlPlane
+// internal types we expose as part of our public API
 
-// APIServer is the re-exported APIServer type from the internal integration package
-type APIServer = controlplane.APIServer
+type (
+	// ControlPlane is the re-exported ControlPlane type from the internal integration package
+	ControlPlane = controlplane.ControlPlane
 
-// Etcd is the re-exported Etcd type from the internal integration package
-type Etcd = controlplane.Etcd
+	// APIServer is the re-exported APIServer 	from the internal integration package
+	APIServer = controlplane.APIServer
 
-// User represents a Kubernetes user to provision for auth purposes.
-type User = controlplane.User
+	// Etcd is the re-exported Etcd 	from the internal integration package
+	Etcd = controlplane.Etcd
 
-// AuthenticatedUser represets a Kubernetes user that's been provisioned.
-type AuthenticatedUser = controlplane.AuthenticatedUser
+	// User represents a Kubernetes user to provision for auth purposes.
+	User = controlplane.User
+
+	// AuthenticatedUser represets a Kubernetes user that's been provisioned.
+	AuthenticatedUser = controlplane.AuthenticatedUser
+
+	// ListenAddr indicates the address and port that the API server should listen on.
+	ListenAddr = process.ListenAddr
+
+	// SecureServing contains details describing how the API server should serve
+	// its secure endpoint.
+	SecureServing = controlplane.SecureServing
+
+	// Authn is an authentication method that can be used with the control plane to
+	// provision users.
+	Authn = controlplane.Authn
+
+	// Arguments allows configuring a process's flags.
+	Arguments = process.Arguments
+
+	// Arg is a single flag with one or more values.
+	Arg = process.Arg
+)
+
+var (
+	// EmptyArguments constructs a new set of flags with nothing set.
+	//
+	// This is mostly useful for testing helper methods -- you'll want to call
+	// Configure on the APIServer (or etcd) to configure their arguments.
+	EmptyArguments = process.EmptyArguments()
+)
 
 // Environment creates a Kubernetes test environment that will start / stop the Kubernetes control plane and
 // install extension APIs
